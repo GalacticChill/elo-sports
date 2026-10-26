@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sports Elo Model — ratings, rankings &amp; outcome probabilities</title>
+<style>
+  :root {
+    --ink: #0d1b2a; --ink-2: #34465a; --muted: #6b7c8f; --faint: #9aa8b6;
+    --line: #e6e9ef; --line-strong: #d5dbe3; --paper: #ffffff; --page: #f4f6f9;
+    --brand: #0e8f6e; --pos: #1a936f; --neg: #d1495b; --accent2: #2f6f9f; --warn: #d98c33; --purple: #7a5bb0;
+    --shadow: 0 1px 2px rgba(13,27,42,.04), 0 8px 24px rgba(13,27,42,.06);
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { font-family: var(--sans); color: var(--ink); background: var(--page); line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  .app { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; }
+  @media (max-width: 900px) { .app { grid-template-columns: 1fr; } }
+
+  .controls { background: var(--paper); border-right: 1px solid var(--line); padding: 26px 22px; position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; }
+  @media (max-width: 900px) { .controls { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--line); } }
+  .brandmark { display: flex; align-items: center; gap: 9px; margin-bottom: 22px; }
+  .brandmark .dot { width: 12px; height: 12px; border-radius: 3px; background: var(--brand); box-shadow: 0 0 0 4px rgba(14,143,110,.14); }
+  .brandmark b { font-size: .95rem; } .brandmark span { color: var(--faint); font-size: .78rem; }
+  .ctl { margin-bottom: 16px; }
+  .ctl label { display: block; font-size: .74rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 7px; }
+  .ctl label .val { float: right; color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+  select, input[type=range] { width: 100%; }
+  select { font-family: var(--sans); font-size: .9rem; color: var(--ink); background: #fbfcfd; border: 1px solid var(--line-strong); border-radius: 9px; padding: 9px 11px; outline: none; }
+  select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(14,143,110,.12); }
+  input[type=range] { accent-color: var(--brand); }
+  .vs { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; }
+  .vs .x { color: var(--faint); font-size: .8rem; }
+  .btn { width: 100%; border: 1px solid var(--brand); background: var(--brand); color: #fff; border-radius: 9px; padding: 10px; font-size: .85rem; cursor: pointer; font-family: var(--sans); font-weight: 600; margin-top: 4px; }
+  .btn:hover { filter: brightness(1.05); }
+  .hint { font-size: .74rem; color: var(--faint); margin-top: 14px; line-height: 1.45; }
+
+  .stage { padding: 34px; overflow-x: hidden; }
+  @media (max-width: 900px) { .stage { padding: 20px; } }
+  .sheet { max-width: 980px; margin: 0 auto; background: var(--paper); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 40px 44px 34px; }
+  @media (max-width: 640px) { .sheet { padding: 26px 20px; } }
+  .sheet-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; border-bottom: 2px solid var(--ink); padding-bottom: 16px; margin-bottom: 24px; }
+  .sheet-head .title { font-family: var(--serif); font-size: 1.9rem; line-height: 1.12; letter-spacing: -.01em; margin: 0; }
+  .sheet-head .period { color: var(--muted); font-size: .85rem; margin-top: 6px; }
+  .sheet-head .tag { text-align: right; color: var(--faint); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; }
+  .sheet-head .tag b { display: block; color: var(--brand); font-size: .8rem; letter-spacing: .05em; }
+
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-bottom: 26px; }
+  @media (max-width: 780px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+  .kpi { padding: 15px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .kpi:nth-child(4n) { border-right: none; }
+  @media (max-width: 780px) { .kpi:nth-child(2n) { border-right: none; } }
+  .kpi .k { font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .kpi .v { font-size: 1.4rem; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .kpi .v.pos { color: var(--pos); } .kpi .v small { font-size: .7rem; color: var(--faint); font-weight: 600; }
+
+  .block { margin-bottom: 26px; }
+  .block h3 { font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); margin: 0 0 12px; font-weight: 700; }
+  .chart-wrap { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 10px; background: linear-gradient(180deg,#fff,#fcfdfe); }
+  svg { display: block; width: 100%; height: auto; }
+  .axis { fill: var(--faint); font-size: 11px; font-family: var(--sans); }
+  .gridline { stroke: var(--line); stroke-width: 1; }
+  .legend { display: flex; gap: 16px; margin: 12px 4px 2px; font-size: .8rem; color: var(--muted); flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+  @media (max-width: 780px) { .two-col { grid-template-columns: 1fr; } }
+
+  table.lb { width: 100%; border-collapse: collapse; font-size: .86rem; font-variant-numeric: tabular-nums; }
+  table.lb td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  table.lb td:first-child { color: var(--muted); width: 28px; }
+  table.lb td:last-child { text-align: right; font-weight: 700; }
+  .bar { height: 7px; border-radius: 4px; background: var(--brand); display: inline-block; vertical-align: middle; margin-left: 8px; }
+
+  .h2h { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 6px; }
+  .h2h .cell { border: 1px solid var(--line); border-radius: 10px; padding: 12px; text-align: center; }
+  .h2h .cell .p { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .h2h .cell .l { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .interp { font-size: .92rem; color: var(--ink-2); } .interp b { color: var(--ink); }
+  .sheet-foot { margin-top: 24px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--faint); font-size: .74rem; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+  @media print {
+    .controls { display: none; } .app { display: block; } body { background: #fff; }
+    .stage { padding: 0; } .sheet { border: none; box-shadow: none; max-width: none; border-radius: 0; padding: 0; }
+    .chart-wrap { background: #fff; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="controls">
+    <div class="brandmark"><span class="dot"></span><b>Sports Elo</b><span>· outcome model</span></div>
+
+    <div class="ctl">
+      <label for="league">League</label>
+      <select id="league"></select>
+    </div>
+    <div class="ctl">
+      <label for="K">K-factor <span class="val" id="Kval">20</span></label>
+      <input type="range" id="K" min="8" max="50" step="1" value="20" />
+    </div>
+    <div class="ctl">
+      <label for="HA">Home advantage <span class="val" id="HAval">65</span></label>
+      <input type="range" id="HA" min="0" max="130" step="5" value="65" />
+    </div>
+    <div class="ctl">
+      <label>Head-to-head predictor</label>
+      <div class="vs"><select id="home"></select><span class="x">vs</span><select id="away"></select></div>
+    </div>
+
+    <button class="btn" id="print">Print / PDF</button>
+    <div class="hint">Elo ratings updated match-by-match (draws score 0.5), with between-season regression to the mean. An ordinal-logistic model maps the rating gap to home/draw/away probabilities, fit on earlier seasons and evaluated out-of-sample on the latest completed season vs the bookmaker. Data: football-data.co.uk, bundled — no key. Educational, not betting advice.</div>
+  </aside>
+
+  <main class="stage"><div class="sheet" id="sheet"></div></main>
+</div>
+
+<script>
+var BUNDLE = /*__DATA__*/;
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var LEAGUES = BUNDLE.leagues, TEAMS = BUNDLE.teams, MATCHES = BUNDLE.matches, SLAB = BUNDLE.seasons;
+  var COLORS = ["#0e8f6e", "#2f6f9f", "#d98c33", "#d1495b", "#7a5bb0", "#0d1b2a"];
+  var state = { league: LEAGUES[0].id, K: 20, HA: 65, home: 0, away: 1 };
+
+  function sig(x) { return 1 / (1 + Math.exp(-x)); }
+  function dnum(di) { var d = new Date(2000, 0, 1); d.setDate(d.getDate() + di); return d; }
+
+  // ---- Elo over all matches (chronological), with between-season regression ----
+  function runElo(league, K, HA, reg) {
+    var ms = MATCHES[league], nT = TEAMS[league].length;
+    var R = new Float64Array(nT); for (var i = 0; i < nT; i++) R[i] = 1500;
+    var seen = new Uint8Array(nT);
+    var recs = [], hist = {}, lastS = -1, maxS = 0, seasonCount = {};
+    for (var k = 0; k < ms.length; k++) {
+      var m = ms[k], s = m[0], di = m[1], hi = m[2], ai = m[3], hg = m[4], ag = m[5];
+      seasonCount[s] = (seasonCount[s] || 0) + 1;
+      if (s !== lastS && lastS !== -1) { for (var t = 0; t < nT; t++) if (seen[t]) R[t] = 1500 + reg * (R[t] - 1500); }
+      lastS = s; if (s > maxS) maxS = s;
+      seen[hi] = 1; seen[ai] = 1;
+      var diff = R[hi] + HA - R[ai];
+      var E = 1 / (1 + Math.pow(10, -diff / 400));
+      var out = hg > ag ? 2 : (hg === ag ? 1 : 0);
+      recs.push({ d: diff, out: out, s: s, oH: m[6], oD: m[7], oA: m[8], hi: hi, ai: ai, di: di });
+      var S = hg > ag ? 1 : (hg === ag ? 0.5 : 0);
+      R[hi] += K * (S - E); R[ai] -= K * (S - E);
+      (hist[hi] = hist[hi] || [[di, 1500]]).push([di, R[hi]]);
+      (hist[ai] = hist[ai] || [[di, 1500]]).push([di, R[ai]]);
+    }
+    return { R: R, recs: recs, hist: hist, maxS: maxS, seasonCount: seasonCount };
+  }
+
+  function probs(d, beta, delta) {
+    var z = beta * d, a = sig(-delta - z), hd = sig(delta - z);
+    return [a, hd - a, 1 - hd]; // [away, draw, home]
+  }
+  function logloss(recs, beta, delta) { var s = 0; for (var i = 0; i < recs.length; i++) { var p = probs(recs[i].d, beta, delta)[recs[i].out]; s += -Math.log(Math.max(p, 1e-12)); } return s / recs.length; }
+  function fitOrdinal(recs) {
+    var best = null;
+    for (var b = 0.002; b <= 0.014; b += 0.001) for (var de = 0.2; de <= 1.2; de += 0.1) {
+      var ll = logloss(recs, b, de);
+      if (!best || ll < best.ll) best = { ll: ll, beta: b, delta: de };
+    }
+    return best;
+  }
+  function brier(p, o) { return (p[0] - (o === 0)) ** 2 + (p[1] - (o === 1)) ** 2 + (p[2] - (o === 2)) ** 2; }
+  function bookProbs(oH, oD, oA) { var i = [1 / oA, 1 / oD, 1 / oH], s = i[0] + i[1] + i[2]; return [i[0] / s, i[1] / s, i[2] / s]; }
+
+  function analyze() {
+    var E = runElo(state.league, state.K, state.HA, 0.75);
+    // test season = latest season that looks complete (current partial season excluded)
+    var counts = E.seasonCount, seasonsPresent = Object.keys(counts).map(Number).sort(function (a, b) { return a - b; });
+    var med = seasonsPresent.map(function (s) { return counts[s]; }).sort(function (a, b) { return a - b; })[Math.floor(seasonsPresent.length / 2)];
+    var maxS = E.maxS, testS = (counts[maxS] < 0.7 * med && maxS > seasonsPresent[0]) ? maxS - 1 : maxS;
+    var train = E.recs.filter(function (r) { return r.s < testS; });
+    var test = E.recs.filter(function (r) { return r.s === testS; });
+    if (train.length < 50) { train = E.recs.slice(0, Math.floor(E.recs.length * 0.6)); test = E.recs.slice(Math.floor(E.recs.length * 0.6)); testS = -1; }
+    var fit = fitOrdinal(train);
+    // metrics
+    var mll = 0, mbr = 0, macc = 0;
+    test.forEach(function (r) { var p = probs(r.d, fit.beta, fit.delta); mll += -Math.log(Math.max(p[r.out], 1e-12)); mbr += brier(p, r.out); if ((p[0] >= p[1] && p[0] >= p[2] ? 0 : p[1] >= p[2] ? 1 : 2) === r.out) macc++; });
+    mll /= test.length; mbr /= test.length; macc /= test.length;
+    var bt = test.filter(function (r) { return r.oH && r.oD && r.oA; });
+    var bll = 0, bbr = 0, bacc = 0;
+    bt.forEach(function (r) { var p = bookProbs(r.oH, r.oD, r.oA); bll += -Math.log(Math.max(p[r.out], 1e-12)); bbr += brier(p, r.out); if ((p[0] >= p[1] && p[0] >= p[2] ? 0 : p[1] >= p[2] ? 1 : 2) === r.out) bacc++; });
+    if (bt.length) { bll /= bt.length; bbr /= bt.length; bacc /= bt.length; }
+    // base rate from train
+    var c = [0, 0, 0]; train.forEach(function (r) { c[r.out]++; }); var base = c.map(function (x) { return x / train.length; });
+    var basell = 0; test.forEach(function (r) { basell += -Math.log(Math.max(base[r.out], 1e-12)); }); basell /= test.length;
+    // calibration on P(home win)
+    var bins = []; for (var i = 0; i < 10; i++) bins.push({ sp: 0, n: 0, obs: 0 });
+    test.forEach(function (r) { var ph = probs(r.d, fit.beta, fit.delta)[2]; var bi = Math.min(9, Math.floor(ph * 10)); bins[bi].sp += ph; bins[bi].n++; bins[bi].obs += (r.out === 2 ? 1 : 0); });
+    // leaderboard teams = teams in latest season present
+    var latest = {}; MATCHES[state.league].forEach(function (m) { if (m[0] === maxS) { latest[m[2]] = 1; latest[m[3]] = 1; } });
+    var board = Object.keys(latest).map(Number).map(function (ti) { return { ti: ti, r: E.R[ti] }; }).sort(function (a, b) { return b.r - a.r; });
+    return { E: E, fit: fit, test: test, testS: testS, mll: mll, mbr: mbr, macc: macc, bll: bll, bbr: bbr, bacc: bacc, base: base, basell: basell, bins: bins, board: board, maxS: maxS };
+  }
+
+  // ---- charts ----
+  var W = 900;
+  function leaderboard(board, league) {
+    var teams = TEAMS[league], top = board.slice(0, 12);
+    var max = top[0].r, min = board[board.length - 1].r, span = Math.max(1, max - min);
+    var h = '<table class="lb"><tbody>';
+    top.forEach(function (row, i) {
+      var w = 20 + 150 * (row.r - min) / span;
+      h += '<tr><td>' + (i + 1) + '</td><td>' + teams[row.ti] + '</td><td>' + Math.round(row.r) + '<span class="bar" style="width:' + w.toFixed(0) + 'px"></span></td></tr>';
+    });
+    h += '</tbody></table>';
+    return h;
+  }
+
+  function trajChart(E, board, league) {
+    var teams = TEAMS[league], sel = board.slice(0, 6);
+    var H = 280, padL = 46, padR = 96, padT = 10, padB = 24, iw = W - padL - padR, ih = H - padT - padB;
+    var allDi = [], lo = Infinity, hi = -Infinity;
+    sel.forEach(function (s) { (E.hist[s.ti] || []).forEach(function (p) { if (p[0] < lo) lo = p[0]; if (p[0] > hi) hi = p[0]; }); });
+    var rlo = Infinity, rhi = -Infinity;
+    sel.forEach(function (s) { (E.hist[s.ti] || []).forEach(function (p) { if (p[1] < rlo) rlo = p[1]; if (p[1] > rhi) rhi = p[1]; }); });
+    var pad = (rhi - rlo) * 0.08; rlo -= pad; rhi += pad;
+    var x = function (di) { return padL + iw * (di - lo) / (hi - lo); };
+    var y = function (r) { return padT + ih - ih * (r - rlo) / (rhi - rlo); };
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="height:' + H + 'px">';
+    for (var g = 0; g <= 4; g++) { var gv = rlo + (rhi - rlo) * g / 4, gy = y(gv); svg += '<line class="gridline" x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '"/><text class="axis" x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end">' + Math.round(gv) + '</text>'; }
+    // year/season ticks
+    for (var tx = 0; tx <= 4; tx++) { var di = lo + (hi - lo) * tx / 4, dt = dnum(di); svg += '<text class="axis" x="' + x(di) + '" y="' + (H - 7) + '" text-anchor="middle">' + (dt.getMonth() + 1) + "/" + (dt.getFullYear() % 100) + '</text>'; }
+    sel.forEach(function (s, i) {
+      var pts = E.hist[s.ti] || [], d = "";
+      for (var k = 0; k < pts.length; k++) d += (k ? "L" : "M") + x(pts[k][0]).toFixed(1) + " " + y(pts[k][1]).toFixed(1) + " ";
+      svg += '<path d="' + d + '" fill="none" stroke="' + COLORS[i] + '" stroke-width="1.8" vector-effect="non-scaling-stroke"/>';
+      var last = pts[pts.length - 1];
+      svg += '<text x="' + (x(last[0]) + 5) + '" y="' + (y(last[1]) + 3) + '" style="font-size:10px;fill:' + COLORS[i] + ';font-weight:600">' + teams[s.ti] + '</text>';
+    });
+    svg += '</svg>';
+    return svg;
+  }
+
+  function calibChart(bins) {
+    var H = 260, pad = 40, iw = 300 - pad - 10, ih = H - pad - 26, VB = 300;
+    var x = function (p) { return pad + iw * p; }, y = function (p) { return (pad - 14) + ih - ih * p; };
+    var svg = '<svg viewBox="0 0 ' + VB + ' ' + H + '" style="height:' + H + 'px">';
+    for (var g = 0; g <= 4; g++) { var gv = g / 4; svg += '<line class="gridline" x1="' + pad + '" y1="' + y(gv) + '" x2="' + (VB - 10) + '" y2="' + y(gv) + '"/><text class="axis" x="' + (pad - 6) + '" y="' + (y(gv) + 3) + '" text-anchor="end">' + (gv * 100).toFixed(0) + '</text><text class="axis" x="' + x(gv) + '" y="' + (H - 6) + '" text-anchor="middle">' + (gv * 100).toFixed(0) + '</text>'; }
+    svg += '<line x1="' + x(0) + '" y1="' + y(0) + '" x2="' + x(1) + '" y2="' + y(1) + '" stroke="var(--line-strong)" stroke-dasharray="4 3"/>';
+    var dd = "", started = false, maxN = Math.max.apply(null, bins.map(function (b) { return b.n; })) || 1;
+    bins.forEach(function (b) { if (b.n === 0) return; var px = x(b.sp / b.n), py = y(b.obs / b.n); dd += (started ? "L" : "M") + px.toFixed(1) + " " + py.toFixed(1) + " "; started = true; });
+    svg += '<path d="' + dd + '" fill="none" stroke="var(--brand)" stroke-width="2" vector-effect="non-scaling-stroke"/>';
+    bins.forEach(function (b) { if (b.n === 0) return; var px = x(b.sp / b.n), py = y(b.obs / b.n), r = 2.5 + 4 * b.n / maxN; svg += '<circle cx="' + px.toFixed(1) + '" cy="' + py.toFixed(1) + '" r="' + r.toFixed(1) + '" fill="var(--brand)"/>'; });
+    svg += '<text class="axis" x="' + x(0.5) + '" y="' + (H - 1) + '" text-anchor="middle" style="fill:var(--faint)">predicted P(home win) %</text>';
+    svg += '</svg>';
+    return svg;
+  }
+
+  function render() {
+    $("Kval").textContent = state.K; $("HAval").textContent = state.HA;
+    var league = state.league, teams = TEAMS[league];
+    var A = analyze();
+    var board = A.board, E = A.E;
+
+    // keep head-to-head selects in range / defaulted to top-2 on league change handled elsewhere
+    var ph = probs(E.R[state.home] + state.HA - E.R[state.away], A.fit.beta, A.fit.delta);
+
+    var lname = LEAGUES.filter(function (l) { return l.id === league; })[0].name;
+    var skill = A.bll ? (A.bll - A.mll) : null;
+
+    var html = "";
+    html += '<div class="sheet-head"><div>';
+    html += '<h1 class="title">' + lname + ' — Elo Model</h1>';
+    html += '<div class="period">Ratings through ' + SLAB[A.maxS] + ' · K=' + state.K + ', home adv ' + state.HA + ' · evaluated on ' + (A.testS >= 0 ? SLAB[A.testS] : "held-out tail") + ' (' + A.test.length + ' matches)</div>';
+    html += '</div><div class="tag">Elo + Ordinal Logit<b>Outcome Model</b></div></div>';
+
+    html += '<div class="kpis">'
+      + '<div class="kpi"><div class="k">Model log-loss</div><div class="v pos">' + A.mll.toFixed(3) + '</div></div>'
+      + '<div class="kpi"><div class="k">Bookmaker log-loss</div><div class="v">' + (A.bll ? A.bll.toFixed(3) : "—") + '</div></div>'
+      + '<div class="kpi"><div class="k">Accuracy</div><div class="v">' + (A.macc * 100).toFixed(1) + '%</div></div>'
+      + '<div class="kpi"><div class="k">Brier score</div><div class="v">' + A.mbr.toFixed(3) + ' <small>vs ' + (A.bbr ? A.bbr.toFixed(3) : "—") + '</small></div></div>'
+      + '</div>';
+
+    html += '<div class="two-col">';
+    html += '<div class="block"><h3>Elo leaderboard — ' + SLAB[A.maxS] + '</h3>' + leaderboard(board, league) + '</div>';
+    html += '<div class="block"><h3>Calibration — predicted vs observed</h3><div class="chart-wrap">' + calibChart(A.bins) + '</div><div class="legend"><span>points on the dashed line = perfectly calibrated</span></div></div>';
+    html += '</div>';
+
+    html += '<div class="block"><h3>Rating trajectories — top 6</h3><div class="chart-wrap">' + trajChart(E, board, league) + '</div></div>';
+
+    html += '<div class="block"><h3>Head-to-head — ' + teams[state.home] + ' (home) vs ' + teams[state.away] + '</h3>';
+    html += '<div class="h2h"><div class="cell"><div class="p" style="color:var(--brand)">' + (ph[2] * 100).toFixed(0) + '%</div><div class="l">' + teams[state.home] + ' win</div></div>'
+      + '<div class="cell"><div class="p" style="color:var(--warn)">' + (ph[1] * 100).toFixed(0) + '%</div><div class="l">Draw</div></div>'
+      + '<div class="cell"><div class="p" style="color:var(--accent2)">' + (ph[0] * 100).toFixed(0) + '%</div><div class="l">' + teams[state.away] + ' win</div></div></div>';
+    html += '<div style="font-size:.78rem;color:var(--faint);margin-top:8px">Ratings: ' + teams[state.home] + ' ' + Math.round(E.R[state.home]) + ' · ' + teams[state.away] + ' ' + Math.round(E.R[state.away]) + ' (+' + state.HA + ' home)</div></div>';
+
+    html += '<div class="block"><h3>How the model does</h3><p class="interp">';
+    html += 'Running Elo (K=' + state.K + ', home advantage ' + state.HA + ') and mapping the rating gap to outcome probabilities, the model scores <b>' + A.mll.toFixed(3) + '</b> log-loss on the held-out ' + (A.testS >= 0 ? SLAB[A.testS] : "tail") + ' season';
+    if (A.bll) html += ' — versus the bookmaker\'s <b>' + A.bll.toFixed(3) + '</b> (' + (skill > 0 ? 'the market is better by ' + skill.toFixed(3) : 'the model edges it by ' + (-skill).toFixed(3)) + ') and a base-rate of <b>' + A.basell.toFixed(3) + '</b>';
+    html += '. Top-rated side: <b>' + teams[board[0].ti] + '</b> at <b>' + Math.round(board[0].r) + '</b>. A simple rating system lands remarkably close to the betting market — the gap to the book is the value of everything Elo ignores (lineups, injuries, form, schedule).';
+    html += '</p></div>';
+
+    html += '<div class="sheet-foot"><span>Data: football-data.co.uk · bundled ' + BUNDLE.built + '</span><span>Educational — same evaluation discipline as the forecasting tools, a different problem shape</span></div>';
+    $("sheet").innerHTML = html;
+  }
+
+  // ---- team selects ----
+  function fillTeamSelects() {
+    var league = state.league, teams = TEAMS[league];
+    var maxS = 0; MATCHES[league].forEach(function (m) { if (m[0] > maxS) maxS = m[0]; });
+    var latest = {}; MATCHES[league].forEach(function (m) { if (m[0] === maxS) { latest[m[2]] = 1; latest[m[3]] = 1; } });
+    var ids = Object.keys(latest).map(Number).sort(function (a, b) { return teams[a] < teams[b] ? -1 : 1; });
+    var opts = ids.map(function (i) { return '<option value="' + i + '">' + teams[i] + '</option>'; }).join("");
+    $("home").innerHTML = opts; $("away").innerHTML = opts;
+    // default to current top-2 by a quick Elo run
+    var E = runElo(league, state.K, state.HA, 0.75);
+    var board = ids.map(function (i) { return { i: i, r: E.R[i] }; }).sort(function (a, b) { return b.r - a.r; });
+    state.home = board[0].i; state.away = board[1].i;
+    $("home").value = state.home; $("away").value = state.away;
+  }
+
+  LEAGUES.forEach(function (l) { var o = document.createElement("option"); o.value = l.id; o.textContent = l.name; $("league").appendChild(o); });
+  $("league").value = state.league;
+  var rt = null; function sched() { clearTimeout(rt); rt = setTimeout(render, 40); }
+  $("league").addEventListener("change", function () { state.league = this.value; fillTeamSelects(); render(); });
+  $("K").addEventListener("input", function () { state.K = +this.value; sched(); });
+  $("HA").addEventListener("input", function () { state.HA = +this.value; sched(); });
+  $("home").addEventListener("change", function () { state.home = +this.value; render(); });
+  $("away").addEventListener("change", function () { state.away = +this.value; render(); });
+  $("print").addEventListener("click", function () { window.print(); });
+
+  fillTeamSelects();
+  render();
+})();
+</script>
+</body>
+</html>
